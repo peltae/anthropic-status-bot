@@ -6,23 +6,42 @@ class StatusChecker {
         this.previousState = null;
         this.currentState = null;
         this.STATUS_URL = 'https://status.anthropic.com';
-        this.components = [
+        this.components = new Set([
             'console.anthropic.com',
             'api.anthropic.com',
             'api.anthropic.com - Beta Features',
             'anthropic.com'
-        ];
+        ]);
+        
+        // Cache selectors for better performance
+        this.selectors = {
+            overall: {
+                description: '.overall-status__description',
+                status: '.overall-status'
+            },
+            component: {
+                container: '.component-container',
+                name: '.name',
+                status: '.component-status'
+            },
+            incident: {
+                container: '.incident-container',
+                title: '.incident-title',
+                update: '.update'
+            }
+        };
     }
 
     async fetchStatus() {
         try {
-            console.log('Fetching status from:', this.STATUS_URL);
-            const response = await axios.get(this.STATUS_URL);
-            console.log('Status page fetched successfully');
+            const response = await axios.get(this.STATUS_URL, {
+                timeout: 10000, // Add timeout for better error handling
+                headers: {
+                    'Accept': 'text/html'
+                }
+            });
             
             const $ = cheerio.load(response.data);
-            
-            // Parse current status
             const currentStatus = {
                 overall: this.parseOverallStatus($),
                 components: this.parseComponents($),
@@ -30,143 +49,135 @@ class StatusChecker {
                 timestamp: new Date().toISOString()
             };
 
-            console.log('Parsed status:', {
-                overallLevel: currentStatus.overall.level,
-                componentCount: Object.keys(currentStatus.components).length,
-                incidentCount: currentStatus.incidents.length
-            });
-
             return currentStatus;
         } catch (error) {
-            console.error('Error fetching Anthropic status:', error.message);
-            if (error.response) {
-                console.error('Response status:', error.response.status);
-                console.error('Response headers:', error.response.headers);
-            }
+            const errorDetails = {
+                message: error.message,
+                status: error.response?.status,
+                headers: error.response?.headers
+            };
+            console.error('Error fetching Anthropic status:', errorDetails);
             return null;
         }
     }
 
     parseOverallStatus($) {
-        console.log('Parsing overall status');
-        // Parse the overall system status
-        const statusText = $('.overall-status__description').text().trim();
-        const statusClass = $('.overall-status').attr('class') || '';
+        const { overall } = this.selectors;
+        const statusText = $(overall.description).text().trim();
+        const statusClass = $(overall.status).attr('class') || '';
         
-        let status = {
+        const status = {
             description: statusText || 'All Systems Operational',
             level: 'operational'
         };
 
-        if (statusClass.includes('degraded')) {
-            status.level = 'degraded';
-        } else if (statusClass.includes('outage')) {
-            status.level = 'outage';
-        } else if (statusClass.includes('maintenance')) {
-            status.level = 'maintenance';
+        // Use Map for better performance than multiple if statements
+        const statusMap = new Map([
+            ['degraded', () => status.level = 'degraded'],
+            ['outage', () => status.level = 'outage'],
+            ['maintenance', () => status.level = 'maintenance']
+        ]);
+
+        for (const [key, setter] of statusMap) {
+            if (statusClass.includes(key)) {
+                setter();
+                break;
+            }
         }
 
-        console.log('Overall status:', status);
         return status;
     }
 
     parseComponents($) {
-        console.log('Parsing components');
+        const { component } = this.selectors;
         const components = {};
-        
-        // Parse each component's status
-        $('.component-container').each((_, element) => {
-            const name = $(element).find('.name').text().trim();
-            const status = $(element).find('.component-status').text().trim();
+        const timestamp = new Date().toISOString();
+
+        $(component.container).each((_, element) => {
+            const $element = $(element);
+            const name = $element.find(component.name).text().trim();
             
-            if (this.components.includes(name)) {
+            if (this.components.has(name)) {
                 components[name] = {
-                    status,
-                    timestamp: new Date().toISOString()
+                    status: $element.find(component.status).text().trim(),
+                    timestamp
                 };
             }
         });
 
-        console.log('Found components:', Object.keys(components).length);
         return components;
     }
 
     parseIncidents($) {
-        console.log('Parsing incidents');
-        const incidents = [];
+        const { incident } = this.selectors;
         
-        // Parse incident updates
-        $('.status-day').each((_, dayElement) => {
-            const $day = $(dayElement);
-            const date = $day.find('.date').text().trim();
-            console.log('Parsing incidents for date:', date);
+        const parseUpdate = ($update) => {
+            const status = $update.find('strong').text().trim().toLowerCase();
+            const message = $update.find('.whitespace-pre-wrap').text().trim();
+            const $small = $update.find('small');
             
-            $day.find('.incident-container').each((_, element) => {
-                const $incident = $(element);
-                const $title = $incident.find('.incident-title');
-                
-                // Get impact level from class
-                const titleClass = $title.attr('class') || '';
-                let impact = 'none';
-                if (titleClass.includes('impact-minor')) impact = 'minor';
-                if (titleClass.includes('impact-major')) impact = 'major';
-                if (titleClass.includes('impact-critical')) impact = 'critical';
+            // More efficient timestamp parsing
+            const dateInfo = {
+                month: $small.text().trim().split(' ')[0],
+                day: $small.find('var[data-var="date"]').text().trim(),
+                time: $small.find('var[data-var="time"]').text().trim(),
+                year: $small.find('var[data-var="year"]').text().trim() || new Date().getFullYear().toString()
+            };
 
-                const incident = {
-                    id: $title.find('a').attr('href')?.split('/').pop() || Date.now().toString(),
-                    name: $title.find('a').text().trim(),
-                    impact,
-                    status: 'investigating', // Default status
-                    updates: []
-                };
+            return {
+                status,
+                message,
+                timestamp: this.parseTimestamp(`${dateInfo.month} ${dateInfo.day}, ${dateInfo.year} ${dateInfo.time}`)
+            };
+        };
 
-                // Parse updates within each incident
-                $incident.find('.update').each((_, updateElement) => {
-                    const $update = $(updateElement);
-                    const status = $update.find('strong').text().trim().toLowerCase();
-                    const message = $update.find('.whitespace-pre-wrap').text().trim();
-                    
-                    // Parse timestamp from var tags
-                    const $small = $update.find('small');
-                    const month = $small.text().trim().split(' ')[0];
-                    const day = $small.find('var[data-var="date"]').text().trim();
-                    const time = $small.find('var[data-var="time"]').text().trim();
-                    const year = $small.find('var[data-var="year"]').text().trim() || new Date().getFullYear();
-                    
-                    incident.updates.push({
-                        status,
-                        message,
-                        timestamp: this.parseTimestamp(`${month} ${day}, ${year} ${time}`)
-                    });
-                });
+        const parseIncident = ($incident) => {
+            const $title = $incident.find(incident.title);
+            const titleClass = $title.attr('class') || '';
+            
+            // Use Map for impact levels
+            const impactMap = new Map([
+                ['impact-minor', 'minor'],
+                ['impact-major', 'major'],
+                ['impact-critical', 'critical']
+            ]);
 
-                // Set incident status to the most recent update's status
-                if (incident.updates.length > 0) {
-                    incident.status = incident.updates[0].status;
+            let impact = 'none';
+            for (const [className, impactLevel] of impactMap) {
+                if (titleClass.includes(className)) {
+                    impact = impactLevel;
+                    break;
                 }
+            }
 
-                console.log('Parsed incident:', {
-                    name: incident.name,
-                    impact: incident.impact,
-                    status: incident.status,
-                    updateCount: incident.updates.length
-                });
+            const updates = [];
+            $incident.find('.update').each((_, el) => updates.push(parseUpdate($(el))));
 
-                incidents.push(incident);
+            return {
+                id: $title.find('a').attr('href')?.split('/').pop() || Date.now().toString(),
+                name: $title.find('a').text().trim(),
+                impact,
+                status: updates[0]?.status || 'investigating',
+                updates
+            };
+        };
+
+        const incidents = [];
+        $('.status-day').each((_, dayElement) => {
+            $(dayElement).find(incident.container).each((_, el) => {
+                incidents.push(parseIncident($(el)));
             });
         });
 
-        console.log('Total incidents parsed:', incidents.length);
         return incidents;
     }
 
     parseTimestamp(timestamp) {
-        // Convert PST/PDT timestamp to ISO string
         try {
+            // More robust timestamp parsing
             const date = new Date(timestamp + ' PST');
-            return date.toISOString();
-        } catch (error) {
-            console.error('Error parsing timestamp:', timestamp, error);
+            return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+        } catch {
             return new Date().toISOString();
         }
     }
@@ -176,37 +187,27 @@ class StatusChecker {
     }
 
     async checkForUpdates() {
-        console.log('Checking for updates...');
         const currentState = await this.fetchStatus();
         
         if (!currentState) {
-            console.log('No current state available');
             return null;
         }
 
-        // Store current state
         this.currentState = currentState;
 
         if (!this.previousState) {
-            console.log('First check, setting initial state');
             this.previousState = currentState;
             return {
                 type: 'initial',
-                message: 'Status monitoring initialized.\nCurrent Status: ' + 
-                        currentState.overall.description + '\n' +
-                        this.formatComponentStatuses(currentState.components),
+                message: `Status monitoring initialized.
+Current Status: ${currentState.overall.description}
+${this.formatComponentStatuses(currentState.components)}`,
                 timestamp: currentState.timestamp
             };
         }
 
         const updates = this.compareStates(this.previousState, currentState);
         this.previousState = currentState;
-
-        if (updates) {
-            console.log('Found updates:', updates.length);
-        } else {
-            console.log('No updates found');
-        }
 
         return updates;
     }
@@ -218,10 +219,9 @@ class StatusChecker {
     }
 
     compareStates(previous, current) {
-        console.log('Comparing states');
         const updates = [];
 
-        // Compare overall status
+        // Check overall status
         if (previous.overall.description !== current.overall.description) {
             updates.push({
                 type: 'status_change',
@@ -231,7 +231,7 @@ class StatusChecker {
             });
         }
 
-        // Compare component statuses
+        // Check component status
         for (const [component, currentStatus] of Object.entries(current.components)) {
             const previousStatus = previous.components[component];
             if (!previousStatus || previousStatus.status !== currentStatus.status) {
@@ -244,35 +244,37 @@ class StatusChecker {
             }
         }
 
-        // Compare incidents
+        // Check incidents
         if (current.incidents.length > 0) {
             const currentIncidentIds = new Set(current.incidents.map(i => i.id));
             const previousIncidentIds = new Set(previous.incidents.map(i => i.id));
 
-            // Check for new incidents
-            current.incidents.forEach(incident => {
+            for (const incident of current.incidents) {
                 if (!previousIncidentIds.has(incident.id)) {
                     updates.push({
                         type: 'new_incident',
-                        message: `New incident reported:\n${incident.name}\nImpact: ${incident.impact}\nStatus: ${incident.status}`,
+                        message: `New incident reported:
+${incident.name}
+Impact: ${incident.impact}
+Status: ${incident.status}`,
                         timestamp: incident.updates[0]?.timestamp || current.timestamp,
                         incident
                     });
-                } else {
-                    // Check for updates to existing incidents
-                    const previousIncident = previous.incidents.find(i => i.id === incident.id);
-                    if (previousIncident && 
-                        (previousIncident.status !== incident.status || 
-                         previousIncident.updates.length !== incident.updates.length)) {
-                        updates.push({
-                            type: 'incident_update',
-                            message: `Incident "${incident.name}" status updated to: ${incident.status}`,
-                            timestamp: incident.updates[0]?.timestamp || current.timestamp,
-                            incident
-                        });
-                    }
+                    continue;
                 }
-            });
+
+                const previousIncident = previous.incidents.find(i => i.id === incident.id);
+                if (previousIncident && 
+                    (previousIncident.status !== incident.status || 
+                     previousIncident.updates.length !== incident.updates.length)) {
+                    updates.push({
+                        type: 'incident_update',
+                        message: `Incident "${incident.name}" status updated to: ${incident.status}`,
+                        timestamp: incident.updates[0]?.timestamp || current.timestamp,
+                        incident
+                    });
+                }
+            }
         }
 
         return updates.length > 0 ? updates : null;
