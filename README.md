@@ -1,4 +1,4 @@
-# anthropic status bot
+# anthropic-status-bot
 
 discord bot that monitors anthropic's status page and provides real-time updates.
 
