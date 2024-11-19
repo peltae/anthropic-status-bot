@@ -38,17 +38,9 @@ async function runTest() {
     if (status) {
         console.log('\nParsed Incidents:');
         status.incidents.forEach((incident, index) => {
-            console.log(`\nIncident ${index + 1}:`);
-            console.log('Name:', incident.name);
-            console.log('ID:', incident.id);
-            console.log('Impact:', incident.impact);
-            console.log('Status:', incident.status);
-            console.log('Updates:');
+            console.log(`\nIncident ${index + 1}:\nName: ${incident.name}\nID: ${incident.id}\nImpact: ${incident.impact}\nStatus: ${incident.status}\nUpdates: `);
             incident.updates.forEach((update, uIndex) => {
-                console.log(`\n  Update ${uIndex + 1}:`);
-                console.log('  Status:', update.status);
-                console.log('  Message:', update.message);
-                console.log('  Timestamp:', update.timestamp);
+                console.log(`\n  Update ${uIndex + 1}:\n  Status: ${update.status}\n  Message: ${update.message}\n  Timestamp: ${update.timestamp}`);
             });
         });
     } else {
