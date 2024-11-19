@@ -8,7 +8,6 @@ discord bot that monitors anthropic's status page and provides real-time updates
 - live status dashboard
 - incident notifications
 - timeline view of updates
-- color-coded status levels
 
 ## setup
 
@@ -19,16 +18,14 @@ cd anthropic-status-bot
 npm install
 ```
 
-2. configure
-```bash
-cp .env.example .env
-# add your discord bot token and channel id
-```
-
-3. run
+2. run
 ```bash
 npm start
 ```
+
+# config
+1. rename .env.example to .env 
+2. add your token & channel id
 
 ## license
 
