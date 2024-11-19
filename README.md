@@ -32,4 +32,4 @@ npm start
 
 ## license
 
-mit license
+this project is licensed under the [mit license](LICENSE)
