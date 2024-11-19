@@ -5,7 +5,6 @@ const StatusChecker = require('./statusChecker');
 class TestStatusChecker extends StatusChecker {
     async fetchStatus() {
         try {
-            // Read the local HTML file instead of making HTTP request
             const htmlContent = await fs.readFile(path.join(__dirname, 'index.html'), 'utf8');
             const $ = this.parseHTML(htmlContent);
             
@@ -29,23 +28,36 @@ class TestStatusChecker extends StatusChecker {
     }
 }
 
+const formatUpdate = (update) => `  Status: ${update.status}
+  Message: ${update.message}
+  Timestamp: ${update.timestamp}`;
+
+const formatIncident = (incident, index) => `Incident ${index + 1}:
+Name: ${incident.name}
+ID: ${incident.id}
+Impact: ${incident.impact}
+Status: ${incident.status}
+
+Updates:
+${incident.updates.map(formatUpdate).join('\n\n')}`;
+
 async function runTest() {
     const checker = new TestStatusChecker();
-    
     console.log('Testing incident parsing...');
+    
     const status = await checker.fetchStatus();
     
-    if (status) {
-        console.log('\nParsed Incidents:');
-        status.incidents.forEach((incident, index) => {
-            console.log(`\nIncident ${index + 1}:\nName: ${incident.name}\nID: ${incident.id}\nImpact: ${incident.impact}\nStatus: ${incident.status}\nUpdates: `);
-            incident.updates.forEach((update, uIndex) => {
-                console.log(`\n  Update ${uIndex + 1}:\n  Status: ${update.status}\n  Message: ${update.message}\n  Timestamp: ${update.timestamp}`);
-            });
-        });
-    } else {
+    if (!status) {
         console.log('Failed to parse incidents');
+        return;
     }
+
+    console.log('\nParsed Incidents:');
+    const formattedIncidents = status.incidents
+        .map(formatIncident)
+        .join('\n\n');
+    
+    console.log(formattedIncidents);
 }
 
 runTest().catch(console.error);
