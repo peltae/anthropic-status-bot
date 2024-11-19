@@ -13,7 +13,6 @@ class StatusChecker {
             'anthropic.com'
         ]);
         
-        // Cache selectors for better performance
         this.selectors = {
             overall: {
                 description: '.overall-status__description',
@@ -35,7 +34,7 @@ class StatusChecker {
     async fetchStatus() {
         try {
             const response = await axios.get(this.STATUS_URL, {
-                timeout: 10000, // Add timeout for better error handling
+                timeout: 10000,
                 headers: {
                     'Accept': 'text/html'
                 }
@@ -71,7 +70,6 @@ class StatusChecker {
             level: 'operational'
         };
 
-        // Use Map for better performance than multiple if statements
         const statusMap = new Map([
             ['degraded', () => status.level = 'degraded'],
             ['outage', () => status.level = 'outage'],
@@ -116,7 +114,6 @@ class StatusChecker {
             const message = $update.find('.whitespace-pre-wrap').text().trim();
             const $small = $update.find('small');
             
-            // More efficient timestamp parsing
             const dateInfo = {
                 month: $small.text().trim().split(' ')[0],
                 day: $small.find('var[data-var="date"]').text().trim(),
@@ -135,7 +132,6 @@ class StatusChecker {
             const $title = $incident.find(incident.title);
             const titleClass = $title.attr('class') || '';
             
-            // Use Map for impact levels
             const impactMap = new Map([
                 ['impact-minor', 'minor'],
                 ['impact-major', 'major'],
@@ -174,7 +170,6 @@ class StatusChecker {
 
     parseTimestamp(timestamp) {
         try {
-            // More robust timestamp parsing
             const date = new Date(timestamp + ' PST');
             return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
         } catch {
@@ -221,7 +216,6 @@ ${this.formatComponentStatuses(currentState.components)}`,
     compareStates(previous, current) {
         const updates = [];
 
-        // Check overall status
         if (previous.overall.description !== current.overall.description) {
             updates.push({
                 type: 'status_change',
@@ -231,7 +225,6 @@ ${this.formatComponentStatuses(currentState.components)}`,
             });
         }
 
-        // Check component status
         for (const [component, currentStatus] of Object.entries(current.components)) {
             const previousStatus = previous.components[component];
             if (!previousStatus || previousStatus.status !== currentStatus.status) {
@@ -244,7 +237,6 @@ ${this.formatComponentStatuses(currentState.components)}`,
             }
         }
 
-        // Check incidents
         if (current.incidents.length > 0) {
             const currentIncidentIds = new Set(current.incidents.map(i => i.id));
             const previousIncidentIds = new Set(previous.incidents.map(i => i.id));
