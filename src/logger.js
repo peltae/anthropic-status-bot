@@ -1,7 +1,18 @@
 const winston = require('winston');
 const config = require('./config');
 
-const logger = winston.createLogger({
+// Create a no-op logger for 'none' level
+const noopLogger = {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    stream: { write: () => {} },
+    logRequest: () => {},
+    logError: () => {}
+};
+
+const logger = config.logging.level === 'none' ? noopLogger : winston.createLogger({
     level: config.logging.level,
     format: winston.format.combine(
         winston.format.timestamp(),

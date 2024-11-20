@@ -5,7 +5,7 @@ const envSchema = z.object({
     DISCORD_TOKEN: z.string().min(1, 'Discord token is required'),
     DISCORD_CHANNEL_ID: z.string().min(1, 'Discord channel ID is required'),
     CHECK_INTERVAL: z.string().transform(Number).default('5'),
-    LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+    LOG_LEVEL: z.enum(['none', 'debug', 'info', 'warn', 'error']).default('info'),
 });
 
 // Application configuration schema
