@@ -30,10 +30,14 @@ const STATUS_COLORS = {
 // Function to create status monitor embed
 function createStatusMonitorEmbed(status) {
     const embed = new EmbedBuilder()
-        .setTitle('🌟 Anthropic Status Monitor')
+        .setAuthor({
+            name: 'ANTHROP\C',
+            iconURL: 'attachment://logo.png'
+        })
+        .setTitle('Status Monitor')
         .setDescription(`${getStatusBadge(status.overall.level)} **Current Status:** ${status.overall.description}`)
         .setTimestamp()
-        .setColor(STATUS_COLORS[status.overall.level] || STATUS_COLORS.default)
+        .setColor(0xE6B8A2) // Anthropic's warm beige color
         .setFooter({ text: '🔄 Last Updated' });
 
     // Add components status with dividers
@@ -209,17 +213,35 @@ async function handleStatusUpdate(currentState, updates) {
         if (statusMessageId) {
             try {
                 const statusMessage = await channel.messages.fetch(statusMessageId);
-                await statusMessage.edit({ embeds: [statusEmbed] });
-                console.log('Status monitor message updated');
+                await statusMessage.edit({ 
+                    files: [{
+                        attachment: './bin/logo.png',
+                        name: 'logo.png'
+                    }],
+                    embeds: [statusEmbed] 
+                });
+                logger.info('Status monitor message updated');
             } catch (error) {
-                console.log('Could not find status message, creating new one');
-                const newMessage = await channel.send({ embeds: [statusEmbed] });
+                logger.info('Could not find status message, creating new one');
+                const newMessage = await channel.send({ 
+                    files: [{
+                        attachment: './bin/logo.png',
+                        name: 'logo.png'
+                    }],
+                    embeds: [statusEmbed] 
+                });
                 statusMessageId = newMessage.id;
             }
         } else {
-            const newMessage = await channel.send({ embeds: [statusEmbed] });
+            const newMessage = await channel.send({ 
+                files: [{
+                    attachment: './bin/logo.png',
+                    name: 'logo.png'
+                }],
+                embeds: [statusEmbed] 
+            });
             statusMessageId = newMessage.id;
-            console.log('Created new status monitor message:', statusMessageId);
+            logger.info('Created new status monitor message:', { messageId: statusMessageId });
         }
 
         // Handle updates if they exist and are in the correct format
