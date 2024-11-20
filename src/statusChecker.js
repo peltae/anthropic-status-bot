@@ -1,25 +1,47 @@
 const axios = require('axios');
+const axiosRetry = require('axios-retry');
 const cheerio = require('cheerio');
+const config = require('./config');
+const logger = require('./logger');
 
 class StatusChecker {
     #previousState;
     #currentState;
     #components;
     #selectors;
-    #STATUS_URL;
+    #client;
 
     constructor() {
         this.#previousState = null;
         this.#currentState = null;
-        this.#STATUS_URL = 'https://status.anthropic.com';
         
-        // Use Set for O(1) lookups
-        this.#components = new Set([
-            'console.anthropic.com',
-            'api.anthropic.com',
-            'api.anthropic.com - Beta Features',
-            'anthropic.com'
-        ]);
+        // Initialize axios client with retry logic
+        this.#client = axios.create({
+            timeout: config.status.timeout,
+            headers: {
+                'Accept': 'text/html',
+                'User-Agent': config.status.userAgent
+            }
+        });
+
+        // Configure retry behavior
+        axiosRetry(this.#client, {
+            retries: config.status.retries,
+            retryDelay: axiosRetry.exponentialDelay,
+            retryCondition: (error) => {
+                return axiosRetry.isNetworkOrIdempotentRequestError(error) ||
+                    (error.response && error.response.status === 429);
+            },
+            onRetry: (retryCount, error) => {
+                logger.warn(`Retry attempt ${retryCount} for request:`, {
+                    url: error.config.url,
+                    error: error.message
+                });
+            }
+        });
+        
+        // Use Set for O(1) lookups from config
+        this.#components = new Set(config.status.components);
         
         // Cache selectors
         this.#selectors = {
@@ -48,13 +70,11 @@ class StatusChecker {
 
     async fetchStatus() {
         try {
-            const response = await axios.get(this.#STATUS_URL, {
-                timeout: 10000,
-                headers: {
-                    'Accept': 'text/html',
-                    'User-Agent': 'StatusChecker/1.0'
-                }
-            });
+            const startTime = Date.now();
+            const response = await this.#client.get(config.status.url);
+            const duration = Date.now() - startTime;
+            
+            logger.logRequest('GET', config.status.url, duration, response.status);
             
             const $ = cheerio.load(response.data, {
                 normalizeWhitespace: true,
@@ -68,8 +88,9 @@ class StatusChecker {
                 timestamp: new Date().toISOString()
             };
         } catch (error) {
-            console.error('Error fetching Anthropic status:', {
-                message: error.message,
+            logger.logError(error, {
+                operation: 'fetchStatus',
+                url: config.status.url,
                 status: error.response?.status,
                 headers: error.response?.headers
             });
@@ -206,12 +227,19 @@ class StatusChecker {
     async checkForUpdates() {
         const currentState = await this.fetchStatus();
         
-        if (!currentState) return null;
+        if (!currentState) {
+            logger.warn('Failed to fetch status update');
+            return null;
+        }
 
         this.#currentState = currentState;
 
         if (!this.#previousState) {
             this.#previousState = currentState;
+            logger.info('Status monitoring initialized', {
+                status: currentState.overall.description,
+                components: this.#formatComponentStatuses(currentState.components)
+            });
             return {
                 type: 'initial',
                 message: `Status monitoring initialized.\nCurrent Status: ${currentState.overall.description}\n${this.#formatComponentStatuses(currentState.components)}`,

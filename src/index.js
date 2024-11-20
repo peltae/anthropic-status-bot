@@ -2,6 +2,8 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const cron = require('node-cron');
 const StatusChecker = require('./statusChecker');
+const config = require('./config');
+const logger = require('./logger');
 
 // Initialize Discord client with minimal required intents
 const client = new Client({
@@ -12,10 +14,6 @@ const client = new Client({
 
 // Initialize status checker
 const statusChecker = new StatusChecker();
-
-// Channel ID from environment variables
-const channelId = process.env.DISCORD_CHANNEL_ID;
-const checkInterval = process.env.CHECK_INTERVAL || 5; // Default to 5 minutes
 
 // Store the status message ID
 let statusMessageId = null;
@@ -195,11 +193,13 @@ function getIncidentColor(impact) {
 // Function to handle Discord messages
 async function handleStatusUpdate(currentState, updates) {
     try {
-        console.log('Handling status update');
-        const channel = await client.channels.fetch(channelId);
+        logger.info('Handling status update');
+        const channel = await client.channels.fetch(config.discord.channelId);
         
         if (!channel) {
-            console.error('Could not find the specified channel:', channelId);
+            logger.error('Could not find the specified channel:', {
+                channelId: config.discord.channelId
+            });
             return;
         }
 
@@ -248,54 +248,75 @@ async function handleStatusUpdate(currentState, updates) {
 
 // Set up status checking schedule
 function setupStatusChecking() {
-    console.log(`Setting up status checks every ${checkInterval} minutes`);
-    console.log('Using channel ID:', channelId);
+    logger.info('Setting up status monitoring', {
+        interval: config.discord.checkInterval,
+        channelId: config.discord.channelId
+    });
 
     // Schedule status checks using node-cron
-    cron.schedule(`*/${checkInterval} * * * *`, async () => {
-        console.log('Checking Anthropic status...');
+    cron.schedule(`*/${config.discord.checkInterval} * * * *`, async () => {
+        logger.debug('Initiating status check');
         try {
             const updates = await statusChecker.checkForUpdates();
             const currentState = statusChecker.getCurrentState();
             await handleStatusUpdate(currentState, updates);
         } catch (error) {
-            console.error('Error during status check:', error);
+            logger.logError(error, { operation: 'statusCheck' });
         }
     });
 
     // Initial check
-    statusChecker.checkForUpdates().then(updates => {
-        const currentState = statusChecker.getCurrentState();
-        handleStatusUpdate(currentState, updates);
-    }).catch(error => {
-        console.error('Error during initial status check:', error);
-    });
+    statusChecker.checkForUpdates()
+        .then(updates => {
+            const currentState = statusChecker.getCurrentState();
+            return handleStatusUpdate(currentState, updates);
+        })
+        .catch(error => {
+            logger.logError(error, { operation: 'initialStatusCheck' });
+            process.exit(1);
+        });
 }
 
 // Discord client events
 client.once('ready', () => {
-    console.log(`Bot is ready! Logged in as ${client.user.tag}`);
+    logger.info(`Bot is ready! Logged in as ${client.user.tag}`);
     setupStatusChecking();
 });
 
 // Error handling
 client.on('error', error => {
-    console.error('Discord client error:', error);
+    logger.logError(error, { source: 'discordClient' });
 });
 
 process.on('unhandledRejection', error => {
-    console.error('Unhandled promise rejection:', error);
+    logger.logError(error, { source: 'unhandledRejection' });
+});
+
+process.on('uncaughtException', error => {
+    logger.logError(error, { source: 'uncaughtException' });
+    process.exit(1);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    logger.info('Received SIGTERM signal. Initiating graceful shutdown...');
+    client.destroy();
+    process.exit(0);
+});
+
+process.on('SIGINT', () => {
+    logger.info('Received SIGINT signal. Initiating graceful shutdown...');
+    client.destroy();
+    process.exit(0);
 });
 
 // Start the bot
-console.log('Starting bot...');
-console.log('Environment variables loaded:', {
-    channelId: channelId ? 'Set' : 'Not set',
-    checkInterval,
-    tokenLength: process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.length : 'Not set'
+logger.info('Starting bot...', {
+    channelId: config.discord.channelId ? 'Set' : 'Not set',
+    checkInterval: config.discord.checkInterval
 });
 
-client.login(process.env.DISCORD_TOKEN).catch(error => {
-    console.error('Error logging in to Discord:', error);
+client.login(config.discord.token).catch(error => {
+    logger.logError(error, { operation: 'login' });
     process.exit(1);
 });
