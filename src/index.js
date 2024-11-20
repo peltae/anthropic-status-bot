@@ -30,28 +30,23 @@ const STATUS_COLORS = {
 // Function to create status monitor embed
 function createStatusMonitorEmbed(status) {
     const embed = new EmbedBuilder()
-        .setAuthor({
-            name: 'ANTHROP\C',
-            iconURL: 'attachment://logo.png'
-        })
-        .setTitle('Status Monitor')
-        .setDescription(`${getStatusBadge(status.overall.level)} **Current Status:** ${status.overall.description}`)
+        .setTitle('anthropic status')
+        .setDescription(`${getStatusBadge(status.overall.level)} ${status.overall.description.toLowerCase()}`)
         .setTimestamp()
-        .setColor(0xE6B8A2) // Anthropic's warm beige color
-        .setFooter({ text: '🔄 Last Updated' });
+        .setColor(STATUS_COLORS[status.overall.level] || STATUS_COLORS.default)
+        .setFooter({ text: 'last updated' });
 
     // Add components status with dividers
     const componentStatus = Object.entries(status.components)
         .map(([name, data]) => {
-            const emoji = getStatusEmoji(data.status.toLowerCase());
-            const statusText = data.status.charAt(0).toUpperCase() + data.status.slice(1);
-            return `${emoji} **${name}**\n┗━ ${statusText}`;
+            const dot = getStatusDot(data.status.toLowerCase());
+            return `${dot} ${name.toLowerCase()}: ${data.status.toLowerCase()}`;
         })
-        .join('\n\n');
+        .join('\n');
 
     if (componentStatus) {
         embed.addFields({
-            name: '🔧 System Components',
+            name: 'components',
             value: componentStatus
         });
     }
@@ -67,14 +62,13 @@ function createStatusMonitorEmbed(status) {
     if (activeIncidents.length > 0) {
         const incidentsList = activeIncidents
             .map(i => {
-                const emoji = getImpactEmoji(i.impact);
-                const statusEmoji = getStatusEmoji(i.status);
-                return `${emoji} **${i.name}**\n┗━ ${statusEmoji} Status: ${i.status.charAt(0).toUpperCase() + i.status.slice(1)}`;
+                const dot = getStatusDot(i.status);
+                return `${dot} ${i.name.toLowerCase()}\nstatus: ${i.status.toLowerCase()}`;
             })
             .join('\n\n');
 
         embed.addFields({
-            name: '⚠️ Active Incidents',
+            name: 'active incidents',
             value: incidentsList
         });
     }
@@ -85,18 +79,16 @@ function createStatusMonitorEmbed(status) {
 // Function to create incident embed
 function createIncidentEmbed(incident, isNew = false) {
     const embed = new EmbedBuilder()
-        .setTitle(`${isNew ? '🚨' : '📝'} ${incident.name}`)
+        .setTitle(incident.name.toLowerCase())
         .setColor(getIncidentColor(incident.impact))
         .setTimestamp();
 
-    // Add impact badge and status
-    const impactEmoji = getImpactEmoji(incident.impact);
-    const statusEmoji = getStatusEmoji(incident.status);
-    
+    // Add impact and status
+    const dot = getStatusDot(incident.status);
     embed.setDescription(
-        `${impactEmoji} **Impact Level:** ${incident.impact.toUpperCase()}\n` +
-        `${statusEmoji} **Current Status:** ${incident.status.charAt(0).toUpperCase() + incident.status.slice(1)}\n\n` +
-        `${getTimelineHeader()}`
+        `impact: ${incident.impact.toLowerCase()}\n` +
+        `${dot} status: ${incident.status.toLowerCase()}\n\n` +
+        `timeline:`
     );
 
     // Add updates with timeline formatting
@@ -104,16 +96,13 @@ function createIncidentEmbed(incident, isNew = false) {
         const updatesText = incident.updates
             .map((update, index) => {
                 const date = new Date(update.timestamp).toLocaleString();
-                const isLast = index === incident.updates.length - 1;
-                const lineStyle = isLast ? '┗' : '┣';
-                
-                return `${lineStyle}━ ${getStatusEmoji(update.status)} **${update.status.toUpperCase()}** - ${date}\n` +
-                       `   ${update.message}`;
+                const dot = getStatusDot(update.status);
+                return `${dot} ${update.status.toLowerCase()} - ${date}\n${update.message.toLowerCase()}`;
             })
             .join('\n\n');
 
         embed.addFields({
-            name: '📋 Updates',
+            name: 'updates',
             value: updatesText
         });
     }
@@ -121,57 +110,43 @@ function createIncidentEmbed(incident, isNew = false) {
     return embed;
 }
 
-// Helper function to get status badge (larger emoji combinations)
+// Helper function to get status badge
 function getStatusBadge(status) {
     switch (status) {
         case 'operational':
-            return '🟢 ✨';
+            return '●';
         case 'degraded':
-            return '🟡 ⚠️';
+            return '●';
         case 'outage':
-            return '🔴 ❌';
+            return '●';
         case 'maintenance':
-            return '🔧 🔄';
+            return '●';
         default:
-            return 'ℹ️';
+            return '○';
     }
 }
 
-// Helper function to get status emoji
-function getStatusEmoji(status) {
+// Helper function to get status dot
+function getStatusDot(status) {
     switch (status) {
         case 'operational':
-            return '🟢';
+            return '●';
         case 'degraded':
-            return '🟡';
+            return '●';
         case 'outage':
-            return '🔴';
+            return '●';
         case 'maintenance':
-            return '🔧';
+            return '●';
         case 'investigating':
-            return '🔍';
+            return '○';
         case 'identified':
-            return '🔎';
+            return '○';
         case 'monitoring':
-            return '👀';
+            return '○';
         case 'resolved':
-            return '✅';
+            return '●';
         default:
-            return 'ℹ️';
-    }
-}
-
-// Helper function to get impact emoji
-function getImpactEmoji(impact) {
-    switch (impact) {
-        case 'critical':
-            return '💥';
-        case 'major':
-            return '⚡';
-        case 'minor':
-            return '⚠️';
-        default:
-            return 'ℹ️';
+            return '○';
     }
 }
 
@@ -213,33 +188,15 @@ async function handleStatusUpdate(currentState, updates) {
         if (statusMessageId) {
             try {
                 const statusMessage = await channel.messages.fetch(statusMessageId);
-                await statusMessage.edit({ 
-                    files: [{
-                        attachment: './bin/logo.png',
-                        name: 'logo.png'
-                    }],
-                    embeds: [statusEmbed] 
-                });
+                await statusMessage.edit({ embeds: [statusEmbed] });
                 logger.info('Status monitor message updated');
             } catch (error) {
                 logger.info('Could not find status message, creating new one');
-                const newMessage = await channel.send({ 
-                    files: [{
-                        attachment: './bin/logo.png',
-                        name: 'logo.png'
-                    }],
-                    embeds: [statusEmbed] 
-                });
+                const newMessage = await channel.send({ embeds: [statusEmbed] });
                 statusMessageId = newMessage.id;
             }
         } else {
-            const newMessage = await channel.send({ 
-                files: [{
-                    attachment: './bin/logo.png',
-                    name: 'logo.png'
-                }],
-                embeds: [statusEmbed] 
-            });
+            const newMessage = await channel.send({ embeds: [statusEmbed] });
             statusMessageId = newMessage.id;
             logger.info('Created new status monitor message:', { messageId: statusMessageId });
         }
