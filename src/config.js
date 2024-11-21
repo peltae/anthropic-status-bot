@@ -23,7 +23,7 @@ const configSchema = z.object({
         checkInterval: z.number(),
     }),
     logging: z.object({
-        level: z.enum(['debug', 'info', 'warn', 'error']),
+        level: z.enum(['none', 'debug', 'info', 'warn', 'error']),
     }),
 });
 
