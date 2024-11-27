@@ -8,119 +8,77 @@ const { createStatusEmbed, createIncidentEmbed } = require('./utils/embedUtils')
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const statusChecker = new StatusChecker();
-let statusMessageId = null;
+const state = { statusMessageId: null, incidentMessages: new Map() };
 
-async function updateStatusMessage(channel, currentState) {
-    const statusEmbed = createStatusEmbed(currentState);
-    
+async function updateMessage(channel, messageId, embed) {
     try {
-        if (statusMessageId) {
-            const statusMessage = await channel.messages.fetch(statusMessageId);
-            await statusMessage.edit({ embeds: [statusEmbed] });
-            logger.info('Status monitor message updated');
-        } else {
-            const newMessage = await channel.send({ embeds: [statusEmbed] });
-            statusMessageId = newMessage.id;
-            logger.info('Created status monitor message', { messageId: statusMessageId });
+        if (messageId) {
+            const message = await channel.messages.fetch(messageId);
+            await message.edit({ embeds: [embed] });
+            return messageId;
         }
-    } catch (error) {
-        logger.warn('Could not find status message, creating new one');
-        const newMessage = await channel.send({ embeds: [statusEmbed] });
-        statusMessageId = newMessage.id;
-    }
-}
-
-async function handleNewIncidents(channel, updates) {
-    if (!Array.isArray(updates)) return;
-    
-    for (const update of updates) {
-        if (update.type === 'new_incident') {
-            await channel.send({ embeds: [createIncidentEmbed(update.incident)] });
-            logger.info('Sent new incident notification');
-        }
+        const message = await channel.send({ embeds: [embed] });
+        return message.id;
+    } catch {
+        const message = await channel.send({ embeds: [embed] });
+        return message.id;
     }
 }
 
 async function handleStatusUpdate(currentState, updates) {
     try {
-        logger.info('Handling status update');
         const channel = await client.channels.fetch(config.discord.channelId);
-        
-        if (!channel) {
-            logger.error('Could not find channel', { channelId: config.discord.channelId });
-            return;
-        }
+        if (!channel) return;
 
-        await updateStatusMessage(channel, currentState);
-        
-        if (updates && updates.type !== 'initial') {
-            await handleNewIncidents(channel, updates);
+        // Update status message
+        state.statusMessageId = await updateMessage(
+            channel, 
+            state.statusMessageId, 
+            createStatusEmbed(currentState)
+        );
+
+        // Handle incident updates
+        if (updates?.type !== 'initial' && Array.isArray(updates)) {
+            for (const update of updates) {
+                if (['new_incident', 'incident_update'].includes(update.type)) {
+                    const messageId = await updateMessage(
+                        channel,
+                        state.incidentMessages.get(update.incident.id),
+                        createIncidentEmbed(update.incident)
+                    );
+                    state.incidentMessages.set(update.incident.id, messageId);
+                }
+            }
         }
     } catch (error) {
         logger.logError(error, { operation: 'handleStatusUpdate' });
     }
 }
 
-function setupStatusChecking() {
-    const checkStatus = async () => {
-        try {
-            const updates = await statusChecker.checkForUpdates();
-            const currentState = statusChecker.getCurrentState();
-            await handleStatusUpdate(currentState, updates);
-        } catch (error) {
-            logger.logError(error, { operation: 'statusCheck' });
-        }
-    };
-
-    logger.info('Setting up status monitoring', {
-        interval: config.discord.checkInterval,
-        channelId: config.discord.channelId
-    });
-
-    cron.schedule(`*/${config.discord.checkInterval} * * * *`, checkStatus);
-    checkStatus().catch(error => {
-        logger.logError(error, { operation: 'initialStatusCheck' });
-        process.exit(1);
-    });
+async function checkStatus() {
+    try {
+        const updates = await statusChecker.checkForUpdates();
+        await handleStatusUpdate(statusChecker.getCurrentState(), updates);
+    } catch (error) {
+        logger.logError(error, { operation: 'statusCheck' });
+    }
 }
 
-// Discord client events
+// Event handlers
 client.once('ready', () => {
-    logger.info(`Bot is ready! Logged in as ${client.user.tag}`);
-    setupStatusChecking();
+    logger.info(`Bot ready as ${client.user.tag}`);
+    cron.schedule(`*/${config.discord.checkInterval} * * * *`, checkStatus);
+    checkStatus();
 });
 
-// Error handling
-client.on('error', error => {
-    logger.logError(error, { source: 'discordClient' });
-});
-
-process.on('unhandledRejection', error => {
-    logger.logError(error, { source: 'unhandledRejection' });
-});
-
-process.on('uncaughtException', error => {
-    logger.logError(error, { source: 'uncaughtException' });
-    process.exit(1);
-});
+client.on('error', error => logger.logError(error, { operation: 'discord' }));
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-    logger.info('Received SIGTERM signal. Initiating graceful shutdown...');
-    client.destroy();
-    process.exit(0);
-});
-
-process.on('SIGINT', () => {
-    logger.info('Received SIGINT signal. Initiating graceful shutdown...');
-    client.destroy();
-    process.exit(0);
-});
-
-// Start the bot
-logger.info('Starting bot...', {
-    channelId: config.discord.channelId ? 'Set' : 'Not set',
-    checkInterval: config.discord.checkInterval
+['SIGTERM', 'SIGINT'].forEach(signal => {
+    process.on(signal, () => {
+        client.destroy();
+        process.exit(0);
+    });
 });
 
 client.login(config.discord.token).catch(error => {

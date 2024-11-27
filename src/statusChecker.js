@@ -1,5 +1,5 @@
 const axios = require('axios');
-const axiosRetry = require('axios-retry');
+const axiosRetry = require('axios-retry').default;
 const cheerio = require('cheerio');
 const config = require('./config');
 const logger = require('./logger');
@@ -10,10 +10,13 @@ class StatusChecker {
     #components;
     #selectors;
     #client;
+    #recentMessages;
+    #MESSAGE_EXPIRY = 60000; // 1 minute in milliseconds
 
     constructor() {
         this.#previousState = null;
         this.#currentState = null;
+        this.#recentMessages = new Map();
         
         // Initialize axios client with retry logic
         this.#client = axios.create({
@@ -259,16 +262,40 @@ class StatusChecker {
             .join('\n');
     }
 
+    #isDuplicate(message, timestamp) {
+        const key = `${message}-${timestamp}`;
+        const now = Date.now();
+        
+        // Clean up old messages
+        for (const [msgKey, msgTime] of this.#recentMessages) {
+            if (now - msgTime > this.#MESSAGE_EXPIRY) {
+                this.#recentMessages.delete(msgKey);
+            }
+        }
+        
+        // Check if message is a duplicate
+        if (this.#recentMessages.has(key)) {
+            return true;
+        }
+        
+        // Store new message
+        this.#recentMessages.set(key, now);
+        return false;
+    }
+
     #compareStates(previous, current) {
         const updates = [];
 
         if (previous.overall.description !== current.overall.description) {
-            updates.push({
-                type: 'status_change',
-                message: `System status changed to: ${current.overall.description}`,
-                timestamp: current.timestamp,
-                level: current.overall.level
-            });
+            const message = `System status changed to: ${current.overall.description}`;
+            if (!this.#isDuplicate(message, current.timestamp)) {
+                updates.push({
+                    type: 'status_change',
+                    message,
+                    timestamp: current.timestamp,
+                    level: current.overall.level
+                });
+            }
         }
 
         this.#compareComponents(previous, current, updates);
@@ -281,12 +308,15 @@ class StatusChecker {
         for (const [component, currentStatus] of Object.entries(current.components)) {
             const previousStatus = previous.components[component];
             if (!previousStatus || previousStatus.status !== currentStatus.status) {
-                updates.push({
-                    type: 'component_update',
-                    message: `${component} status changed to: ${currentStatus.status}`,
-                    timestamp: currentStatus.timestamp,
-                    component
-                });
+                const message = `${component} status changed to: ${currentStatus.status}`;
+                if (!this.#isDuplicate(message, currentStatus.timestamp)) {
+                    updates.push({
+                        type: 'component_update',
+                        message,
+                        timestamp: currentStatus.timestamp,
+                        component
+                    });
+                }
             }
         }
     }
@@ -297,7 +327,36 @@ class StatusChecker {
         const currentIncidentIds = new Set(current.incidents.map(i => i.id));
         const previousIncidentIds = new Set(previous.incidents.map(i => i.id));
 
+        // Check for resolved incidents
+        for (const previousId of previousIncidentIds) {
+            if (!currentIncidentIds.has(previousId)) {
+                const resolvedIncident = previous.incidents.find(i => i.id === previousId);
+                if (resolvedIncident) {
+                    updates.push({
+                        type: 'incident_resolved',
+                        message: `Incident "${resolvedIncident.name}" has been resolved`,
+                        timestamp: new Date().toISOString(),
+                        incident: {
+                            ...resolvedIncident,
+                            status: 'resolved',
+                            updates: [
+                                {
+                                    status: 'resolved',
+                                    message: 'This incident has been resolved.',
+                                    timestamp: new Date().toISOString()
+                                },
+                                ...resolvedIncident.updates
+                            ]
+                        }
+                    });
+                }
+            }
+        }
+
         for (const incident of current.incidents) {
+            const previousIncident = previous.incidents.find(i => i.id === incident.id);
+            
+            // New incident
             if (!previousIncidentIds.has(incident.id)) {
                 updates.push({
                     type: 'new_incident',
@@ -308,16 +367,18 @@ class StatusChecker {
                 continue;
             }
 
-            const previousIncident = previous.incidents.find(i => i.id === incident.id);
-            if (previousIncident && 
-                (previousIncident.status !== incident.status || 
-                 previousIncident.updates.length !== incident.updates.length)) {
-                updates.push({
-                    type: 'incident_update',
-                    message: `Incident "${incident.name}" status updated to: ${incident.status}`,
-                    timestamp: incident.updates[0]?.timestamp || current.timestamp,
-                    incident
-                });
+            // Check for any changes in the incident
+            if (previousIncident) {
+                // Status change or new updates
+                if (previousIncident.status !== incident.status || 
+                    previousIncident.updates.length !== incident.updates.length) {
+                    updates.push({
+                        type: 'incident_update',
+                        message: `Incident "${incident.name}" has been updated`,
+                        timestamp: incident.updates[0]?.timestamp || current.timestamp,
+                        incident
+                    });
+                }
             }
         }
     }
