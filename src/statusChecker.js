@@ -327,56 +327,37 @@ class StatusChecker {
         const currentIncidentIds = new Set(current.incidents.map(i => i.id));
         const previousIncidentIds = new Set(previous.incidents.map(i => i.id));
 
-        // Check for resolved incidents
+        // Handle new and updated incidents
+        for (const incident of current.incidents) {
+            const previousIncident = previous.incidents.find(i => i.id === incident.id);
+            
+            if (!previousIncidentIds.has(incident.id)) {
+                updates.push({ type: 'new_incident', incident });
+                continue;
+            }
+
+            if (previousIncident && 
+                (previousIncident.status !== incident.status || 
+                previousIncident.updates.length !== incident.updates.length)) {
+                updates.push({ type: 'incident_update', incident });
+            }
+        }
+
+        // Handle resolved incidents
         for (const previousId of previousIncidentIds) {
             if (!currentIncidentIds.has(previousId)) {
                 const resolvedIncident = previous.incidents.find(i => i.id === previousId);
                 if (resolvedIncident) {
                     updates.push({
                         type: 'incident_resolved',
-                        message: `Incident "${resolvedIncident.name}" has been resolved`,
-                        timestamp: new Date().toISOString(),
                         incident: {
                             ...resolvedIncident,
                             status: 'resolved',
                             updates: [
-                                {
-                                    status: 'resolved',
-                                    message: 'This incident has been resolved.',
-                                    timestamp: new Date().toISOString()
-                                },
+                                { status: 'resolved', message: 'Incident resolved', timestamp: new Date().toISOString() },
                                 ...resolvedIncident.updates
                             ]
                         }
-                    });
-                }
-            }
-        }
-
-        for (const incident of current.incidents) {
-            const previousIncident = previous.incidents.find(i => i.id === incident.id);
-            
-            // New incident
-            if (!previousIncidentIds.has(incident.id)) {
-                updates.push({
-                    type: 'new_incident',
-                    message: `New incident reported:\n${incident.name}\nImpact: ${incident.impact}\nStatus: ${incident.status}`,
-                    timestamp: incident.updates[0]?.timestamp || current.timestamp,
-                    incident
-                });
-                continue;
-            }
-
-            // Check for any changes in the incident
-            if (previousIncident) {
-                // Status change or new updates
-                if (previousIncident.status !== incident.status || 
-                    previousIncident.updates.length !== incident.updates.length) {
-                    updates.push({
-                        type: 'incident_update',
-                        message: `Incident "${incident.name}" has been updated`,
-                        timestamp: incident.updates[0]?.timestamp || current.timestamp,
-                        incident
                     });
                 }
             }

@@ -17,8 +17,7 @@ const createStatusEmbed = (status) => {
         .setTitle('anthropic status')
         .setDescription(`${getStatusDot(status.overall.level)} ${formatStatus(status.overall.description)}`)
         .setTimestamp()
-        .setColor(STATUS_COLORS[status.overall.level] || STATUS_COLORS.default)
-        .setFooter({ text: 'last updated' });
+        .setColor(STATUS_COLORS[status.overall.level] || STATUS_COLORS.default);
 
     const componentStatus = Object.entries(status.components)
         .map(([name, data]) => `${getStatusDot(data.status)} ${formatName(name)} · ${formatStatus(data.status)}`)
@@ -28,13 +27,7 @@ const createStatusEmbed = (status) => {
         embed.addFields({ name: 'components', value: componentStatus });
     }
 
-    const activeIncidents = status.incidents
-        .filter(i => i.status !== 'resolved')
-        .sort((a, b) => {
-            const priority = { critical: 3, major: 2, minor: 1, none: 0 };
-            return priority[b.impact] - priority[a.impact];
-        });
-
+    const activeIncidents = status.incidents.filter(i => i.status !== 'resolved');
     if (activeIncidents.length > 0) {
         const incidentsList = activeIncidents
             .map(i => `${getStatusDot(i.status)} ${formatStatus(i.name)}\n    status: ${formatStatus(i.status)}`)
@@ -49,21 +42,21 @@ const createIncidentEmbed = (incident) => {
     const embed = new EmbedBuilder()
         .setTitle(formatStatus(incident.name))
         .setColor(STATUS_COLORS[incident.impact] || STATUS_COLORS.default)
-        .setTimestamp();
-
-    embed.setDescription(
-        `impact: ${formatStatus(incident.impact)}\n` +
-        `${getStatusDot(incident.status)} status: ${formatStatus(incident.status)}\n\n` +
-        `timeline:`
-    );
+        .setTimestamp()
+        .setDescription(
+            `impact: ${formatStatus(incident.impact)}\n` +
+            `${getStatusDot(incident.status)} status: ${formatStatus(incident.status)}`
+        );
 
     if (incident.updates?.length > 0) {
         const updatesText = incident.updates
-            .map(update => {
-                const date = new Date(update.timestamp).toLocaleString();
-                return `${getStatusDot(update.status)} ${formatStatus(update.status)}  ·  ${date}\n    ${formatStatus(update.message)}`;
-            })
+            .map(update => (
+                `${getStatusDot(update.status)} ${formatStatus(update.status)}\n` +
+                `    ${new Date(update.timestamp).toLocaleString()}\n` +
+                `    ${update.message}`
+            ))
             .join('\n\n');
+        
         embed.addFields({ name: 'updates', value: updatesText });
     }
 
