@@ -18,12 +18,13 @@ class StatusChecker {
         this.#currentState = null;
         this.#recentMessages = new Map();
         
-        // Initialize axios client with retry logic
+        // Initialize axios client with retry logic and caching
         this.#client = axios.create({
             timeout: config.status.timeout,
             headers: {
                 'Accept': 'text/html',
-                'User-Agent': config.status.userAgent
+                'User-Agent': config.status.userAgent,
+                'Cache-Control': 'max-age=60' // Cache responses for 60 seconds
             }
         });
 
@@ -266,11 +267,20 @@ class StatusChecker {
         const key = `${message}-${timestamp}`;
         const now = Date.now();
         
-        // Clean up old messages
-        for (const [msgKey, msgTime] of this.#recentMessages) {
-            if (now - msgTime > this.#MESSAGE_EXPIRY) {
-                this.#recentMessages.delete(msgKey);
+        // Clean up old messages periodically (every 100 checks)
+        if (this.#recentMessages.size > 0 && this.#recentMessages.size % 100 === 0) {
+            const expiredTime = now - this.#MESSAGE_EXPIRY;
+            for (const [msgKey, msgTime] of this.#recentMessages) {
+                if (msgTime < expiredTime) {
+                    this.#recentMessages.delete(msgKey);
+                }
             }
+        }
+        
+        // Limit Map size to prevent memory leaks
+        if (this.#recentMessages.size > 1000) {
+            const oldestKey = this.#recentMessages.keys().next().value;
+            this.#recentMessages.delete(oldestKey);
         }
         
         // Check if message is a duplicate
